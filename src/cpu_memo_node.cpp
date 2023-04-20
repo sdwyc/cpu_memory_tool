@@ -2,7 +2,12 @@
 #include <thread>
 #include <chrono>
 #include <string.h>
- 
+#include <ros/ros.h>
+#include <iostream>
+#include <fstream>
+#include <ros/package.h>
+#include <boost/filesystem.hpp>
+
 #ifdef WIN32
 #include <windows.h>  
 #include <psapi.h>  
@@ -15,7 +20,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 #endif
- 
+
+using namespace std;
 // get current process pid
 inline int GetCurrentPid()
 {
@@ -233,23 +239,47 @@ inline float GetMemoryUsage(int pid)
     return vmrss / 1024.0;
 #endif
 }
-int main()
-{
-    // launch some task to occupy cpu and memory
-    for (int i = 0; i < 5; i++)
-        std::thread([]
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }).detach();
-    int current_pid = GetCurrentPid(); // or you can set a outside program pid
-    float cpu_usage_ratio = GetCpuUsageRatio(current_pid);
-    float memory_usage = GetMemoryUsage(current_pid);
-    while (true)
-    {
-        std::cout << "current pid: " << current_pid << std::endl;
-        std::cout << "cpu usage ratio: " << cpu_usage_ratio * 100 << "%" << std::endl;
-        std::cout << "memory usage: " << memory_usage << "MB" << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+int main(int argc, char **argv){
+    ros::init(argc, argv, "cpu_memo_node");
+    ros::NodeHandle nh;
+    // // launch some task to occupy cpu and memory
+    // for (int i = 0; i < 5; i++)
+    //     std::thread([]
+    //         {
+    //             std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    //         }).detach();
+    string pkg_path = ros::package::getPath("cpu_memo_tool");
+    string data_file_path = pkg_path + "/data/data.txt";
+    auto file_path = boost::filesystem::path(data_file_path);
+    if(boost::filesystem::exists(file_path)){
+        boost::filesystem::remove(file_path);
+        std::cout << "Removed existed files" << std::endl;
     }
+    ofstream dataFile;
+    dataFile.open(data_file_path, ofstream::app);
+    fstream file(data_file_path, ios::out);
+    bool status = ros::ok();
+    while (status)
+    {
+        int core = atoi(argv[1]);
+        float total_available = core;
+        float total_occu = 0;
+        float total_memo = 0;
+        for(int i=2; i<argc; i++){
+            int pid = atoi(argv[i]);
+            float cpu_usage_ratio = GetCpuUsageRatio(pid);
+            float memory_usage = GetMemoryUsage(pid);
+            total_occu += cpu_usage_ratio;
+            total_memo += memory_usage;
+        }
+        dataFile << total_occu*100/total_available << "," << total_memo << endl;
+        // int current_pid = GetCurrentPid(); // or you can set a outside program pid
+        std::cout << "cpu usage ratio: " << total_occu*100/total_available << "%" << std::endl;
+        std::cout << "memory usage: " << total_memo << "MB" << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        status = ros::ok();
+    }
+    dataFile.close();
     return 0;
 }
